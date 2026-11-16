@@ -25,6 +25,8 @@ except ImportError:
     _TRANSCRIPT_OK = False
 
 from config import get_os, is_windows, is_mac, is_linux
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
 
 
 def _get_base_dir() -> Path:
@@ -34,7 +36,7 @@ def _get_base_dir() -> Path:
 
 
 BASE_DIR        = _get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+
 
 HEADERS = {
     "User-Agent": (
@@ -152,22 +154,22 @@ def _get_transcript(video_id: str) -> str | None:
 
 
 def _summarize_with_gemini(transcript: str, video_url: str) -> str:
-    from or_client import client
-
+    
     max_chars = 80000
     truncated = transcript[:max_chars] + ("..." if len(transcript) > max_chars else "")
 
-    return client.chat(
-        f"Please summarize this YouTube video transcript:\n\n{truncated}",
-        system=(
+    model = get_chat_model(provider="openrouter", max_tokens=2048)
+    messages = [
+        SystemMessage(content=(
             "You are JARVIS, an AI assistant. "
             "Summarize YouTube video transcripts clearly and concisely. "
             "Structure: 1-sentence overview, then 3-5 key points. "
             "Be direct. Address the user as 'sir'. "
             "Match the language of the transcript."
-        ),
-        max_tokens=2048,
-    )
+        )),
+        HumanMessage(content=f"Please summarize this YouTube video transcript:\n\n{truncated}")
+    ]
+    return extract_text(model.invoke(messages)).strip()
 
 
 def _save_summary(content: str, video_url: str) -> str:

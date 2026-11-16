@@ -13,6 +13,7 @@ import mss.tools
 import sounddevice as sd
 import numpy as np
 from pathlib import Path
+from config import settings
 
 try:
     import PIL.Image
@@ -29,7 +30,8 @@ def get_base_dir():
     return Path(__file__).resolve().parent.parent
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+
+CAMERA_CONFIG_PATH = settings.config_dir / "camera_config.json"
 
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 CHANNELS            = 1
@@ -51,27 +53,30 @@ SYSTEM_PROMPT = (
 )
 
 
+
+
 def _get_api_key() -> str:
-    try:
-        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-            keys = json.load(f)
-        key = keys.get("gemini_api_key", "")
-        if not key:
-            raise ValueError("gemini_api_key not found")
-        return key
-    except Exception as e:
-        raise RuntimeError(f"Could not load API key: {e}")
+    key = settings.gemini_api_key
+    if not key:
+        raise RuntimeError("Could not load API key: GEMINI_API_KEY is not set.")
+    return key
 
 
 def _get_camera_index() -> int:
-    try:
-        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        if "camera_index" in cfg:
-            return int(cfg["camera_index"])
-    except Exception:
-        pass
+    # 1. Check if explicitly defined in .env / settings
+    if settings.camera_index >= 0:
+        return settings.camera_index
 
+    # 2. Check dedicated hardware cache file
+    if CAMERA_CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CAMERA_CONFIG_PATH.read_text(encoding="utf-8"))
+            if "camera_index" in cfg:
+                return int(cfg["camera_index"])
+        except Exception:
+            pass
+    
+    # 3. Auto-detect if not found
     print("[Camera] 🔍 No camera index in config. Auto-detecting...")
     best_index = 0
 
@@ -86,24 +91,23 @@ def _get_camera_index() -> int:
         cap.release()
         if ret and frame is not None and frame.mean() > 5:
             best_index = idx
-            print(f"[Camera] ✅ Camera found at index {idx} — saving to config.")
+            print(f"[Camera] ✅ Camera found at index {idx} — saving to cache.")
             break
         else:
             print(f"[Camera] ⚠️  Index {idx}: no valid frame.")
-
+    # 4. Save to dedicated hardware cache
     try:
-        cfg = {}
-        if API_CONFIG_PATH.exists():
-            with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-        cfg["camera_index"] = best_index
-        with open(API_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=4)
-        print(f"[Camera] 💾 Camera index {best_index} saved to config.")
+        settings.config_dir.mkdir(parents=True, exist_ok=True)
+        CAMERA_CONFIG_PATH.write_text(
+            json.dumps({"camera_index": best_index}, indent=4),
+            encoding="utf-8"
+        )
+        settings.camera_index = best_index
+        print(f"[Camera] 💾 Camera index {best_index} saved.")
     except Exception as e:
         print(f"[Camera] ⚠️  Could not save camera index: {e}")
-
     return best_index
+
 
 
 def _to_jpeg(img_bytes: bytes) -> bytes:

@@ -5,6 +5,9 @@ from threading import Lock
 from pathlib import Path
 import sys
 
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
+
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -139,23 +142,25 @@ def update_memory(memory_update: dict) -> dict:
 
 def should_extract_memory(user_text: str, jarvis_text: str, api_key: str = "") -> bool:
     try:
-        from or_client import client
+        
 
         combined = f"User: {user_text[:300]}\nJarvis: {jarvis_text[:1000]}"
 
-        result = client.chat(
-            f"Does this conversation contain ANY of the following?\n"
-            f"- Personal facts (name, age, city, job, birthday, nationality)\n"
-            f"- Preferences or favorites (food, color, music, sport, game, film, book, etc.)\n"
-            f"- Active projects or goals the user is working on\n"
-            f"- People in the user's life (friends, family, partner, colleagues)\n"
-            f"- Things the user wants to do or buy in the future\n"
-            f"- Any other fact worth remembering long-term\n\n"
-            f"Reply only YES or NO.\n\nConversation:\n{combined}",
-            system="You are a memory relevance checker. Reply only YES or NO.",
-            max_tokens=5,
-            temperature=0.0,
-        )
+        model = get_chat_model(provider="openrouter", temperature=0.0, max_tokens=5)
+        messages = [
+            SystemMessage(content="You are a memory relevance checker. Reply only YES or NO."),
+            HumanMessage(content=(
+                f"Does this conversation contain ANY of the following?\n"
+                f"- Personal facts (name, age, city, job, birthday, nationality)\n"
+                f"- Preferences or favorites (food, color, music, sport, game, film, book, etc.)\n"
+                f"- Active projects or goals the user is working on\n"
+                f"- People in the user's life (friends, family, partner, colleagues)\n"
+                f"- Things the user wants to do or buy in the future\n"
+                f"- Any other fact worth remembering long-term\n\n"
+                f"Reply only YES or NO.\n\nConversation:\n{combined}"
+            ))
+        ]
+        result = extract_text(model.invoke(messages)).strip()
         return "YES" in result.upper()
 
     except Exception as e:
@@ -165,14 +170,16 @@ def should_extract_memory(user_text: str, jarvis_text: str, api_key: str = "") -
 
 def extract_memory(user_text: str, jarvis_text: str, api_key: str = "") -> dict:
     try:
-        from or_client import client
+        
 
         combined = f"User: {user_text[:600]}\nJarvis: {jarvis_text[:300]}"
-
-        raw = client.chat(
-            f"Extract ALL memorable personal facts from this conversation. Any language.\n"
-            f"Return ONLY valid JSON. Use {{}} if truly nothing is worth saving.\n\n"
-            f"Category guide:\n"
+        model = get_chat_model(provider="openrouter", temperature=0.2, max_tokens=1024)
+        messages = [
+            SystemMessage(content="Return ONLY valid JSON. No markdown, no explanation, no extra text."),
+            HumanMessage(content=(
+                f"Extract ALL memorable personal facts from this conversation. Any language.\n"
+                f"Return ONLY valid JSON. Use {{}} if truly nothing is worth saving.\n\n"
+                f"Category guide:\n"
             f"  identity      → name, age, birthday, city, country, job, school, nationality, language\n"
             f"  preferences   → ANY favorite or preferred thing:\n"
             f"                  favorite_food, favorite_color, favorite_music, favorite_film,\n"
@@ -196,18 +203,13 @@ def extract_memory(user_text: str, jarvis_text: str, api_key: str = "") -> dict:
             f' "relationships":{{"friend_yusuf":{{"value":"close friend"}}}},\n'
             f' "wishes":{{"buy_guitar":{{"value":"wants an acoustic guitar"}}}},\n'
             f' "notes":{{"works_at_night":{{"value":"usually active late at night"}}}}}}\n\n'
-            f"Conversation:\n{combined}\n\nJSON:",
-            system="Return ONLY valid JSON. No markdown, no explanation, no extra text.",
-            max_tokens=1024,
-            temperature=0.2,
-        )
-
-        clean = raw.strip()
-        clean = re.sub(r"```(?:json)?", "", clean).strip().rstrip("`").strip()
-
+                f"Conversation:\n{combined}\n\nJSON:"
+            ))
+        ]
+        raw = extract_text(model.invoke(messages)).strip()
+        clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
         if not clean or clean == "{}":
             return {}
-
         return json.loads(clean)
 
     except json.JSONDecodeError:

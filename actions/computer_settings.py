@@ -6,6 +6,8 @@ import time
 import subprocess
 import platform
 from pathlib import Path
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
 
 try:
     import pyautogui
@@ -563,7 +565,7 @@ _DANGEROUS_ACTIONS = {"restart", "shutdown"}
 
 
 def _detect_action(description: str) -> dict:
-    from or_client import client
+    
 
     available = ", ".join(sorted(ACTION_MAP.keys())) + \
                 ", volume_set, type_text, press_key, reload_n"
@@ -580,8 +582,14 @@ Rules:
 - Return ONLY the JSON, no explanation, no markdown."""
 
     try:
-        raw  = client.chat_json(prompt, system="Return only valid JSON. No extra text.")
-        return raw
+        model = get_chat_model(provider="openrouter", temperature=0.0)
+        messages = [
+            SystemMessage(content="Return only valid JSON. No extra text."),
+            HumanMessage(content=prompt)
+        ]
+        raw = extract_text(model.invoke(messages)).strip()
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+        return json.loads(raw)
     except Exception as e:
         print(f"[Settings] Intent detection failed: {e}")
         return {"action": description.lower().replace(" ", "_"), "value": None}

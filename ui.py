@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from config import settings
 
 import psutil
 
@@ -1439,14 +1440,12 @@ class MainWindow(QMainWindow):
         self.hud.speaking = (state == "SPEAKING")
 
     def _check_config(self) -> bool:
-        if not API_FILE.exists(): return False
-        try:
-            d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return (bool(d.get("gemini_api_key")) and
-                    bool(d.get("openrouter_api_key")) and
-                    bool(d.get("os_system")))
-        except Exception:
-            return False
+        is_valid, _ = settings.validate_keys()
+        return is_valid
+
+  
+
+  
 
     def _show_setup(self):
         ov = SetupOverlay(self.centralWidget())
@@ -1466,9 +1465,9 @@ class MainWindow(QMainWindow):
         os.makedirs(CONFIG_DIR, exist_ok=True)
         API_FILE.write_text(
             json.dumps({
-                "gemini_api_key":    key,
-                "openrouter_api_key": or_key,
-                "os_system":         os_name,
+                "settings.gemini_api_key":    key,
+                "settings.openrouter_api_key": or_key,
+                "settings.os_system":         os_name.lower(),
             }, indent=4),
             encoding="utf-8",
         )

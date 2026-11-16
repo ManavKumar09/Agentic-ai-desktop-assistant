@@ -9,6 +9,9 @@ import platform
 from pathlib import Path
 from datetime import datetime
 
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
+
 try:
     import pyautogui
     _PYAUTOGUI = True
@@ -96,7 +99,8 @@ def _execute_generated_code(code: str, player=None) -> str:
         return f"Execution error: {e}"
 
 def _ask_gemini_for_desktop_action(task: str) -> str:
-    from or_client import client
+    
+
 
     desktop = str(_get_desktop())
     os_specific = {
@@ -124,7 +128,12 @@ Output ONLY the Python code. No explanation, no markdown, no backticks.
 Task: {task}"""
 
     try:
-        return client.chat(prompt, system="You are a code generator. Output only raw Python code.")
+        model = get_chat_model(provider='openrouter')
+        messages = [
+            SystemMessage(content="You are a code generator. Output only raw Python code."),
+            HumanMessage(content=prompt)
+        ]
+        return extract_text(model.invoke(messages)).strip()
     except Exception as e:
         return f"ERROR: {e}"
         

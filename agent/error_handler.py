@@ -3,7 +3,10 @@ import re
 import sys
 from pathlib import Path
 from enum import Enum
+from config import settings
 
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -12,7 +15,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 class ErrorDecision(Enum):
@@ -49,9 +51,10 @@ Return ONLY valid JSON:
 """
 
 
+
+
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return settings.gemini_api_key
 
 
 def analyze_error(
@@ -78,7 +81,6 @@ def analyze_error(
             "user_message": str
         }
     """
-    import google.generativeai as genai
 
     if attempt >= max_attempts:
         print(f"[ErrorHandler] ⚠️ Max attempts reached for step {step.get('step')} — forcing replan")
@@ -90,26 +92,28 @@ def analyze_error(
             "user_message":  "Trying a different approach, sir."
         }
 
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash-lite",
-        system_instruction=ERROR_ANALYST_PROMPT
-    )
+    model = get_chat_model(provider="gemini")
+
 
     prompt = f"""Failed step:
-Tool: {step.get('tool')}
-Description: {step.get('description')}
-Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
-Critical: {step.get('critical', False)}
+                Tool: {step.get('tool')}
+                Description: {step.get('description')}
+                Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
+                Critical: {step.get('critical', False)}
 
-Error:
-{error[:500]}
+                Error:
+                {error[:500]}
 
-Attempt number: {attempt}"""
+                Attempt number: {attempt}
+                """
+    messages = [
+        SystemMessage(content=ERROR_ANALYST_PROMPT),
+        HumanMessage(content=prompt)
+    ]
 
     try:
-        response = model.generate_content(prompt)
-        text     = response.text.strip()
+        response = model.invoke(messages)
+        text     = extract_text(response).strip()
         text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
 
         result = json.loads(text)
@@ -148,27 +152,23 @@ def generate_fix(step: dict, error: str, fix_suggestion: str) -> dict:
 
     Returns a modified step dict.
     """
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(model_name="gemini-2.0-flash")
-
+    model = get_chat_model(provider="gemini")
     prompt = f"""A task step failed. Generate a replacement step.
 
-Original step:
-Tool: {step.get('tool')}
-Description: {step.get('description')}
-Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
+                Original step:
+                Tool: {step.get('tool')}
+                Description: {step.get('description')}
+                Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
 
-Error: {error[:300]}
-Fix suggestion: {fix_suggestion}
+                Error: {error[:300]}
+                Fix suggestion: {fix_suggestion}
 
-Write a Python script that accomplishes the same goal differently.
-Return ONLY the Python code, no explanation."""
+                Write a Python script that accomplishes the same goal differently.
+                Return ONLY the Python code, no explanation."""
 
     try:
-        response = model.generate_content(prompt)
-        code = response.text.strip()
+        response = model.invoke(prompt)
+        code = extract_text(response).strip()
         code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
 
         return {
