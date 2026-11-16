@@ -1,8 +1,9 @@
 import asyncio, json
 from google import genai
 from google.genai import types
+from config import settings
 
-key = json.load(open('config/api_keys.json'))['gemini_api_key']
+key = settings.gemini_api_key
 client = genai.Client(api_key=key, http_options={'api_version': 'v1beta'})
 
 async def test():

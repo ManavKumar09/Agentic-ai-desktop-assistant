@@ -2,6 +2,11 @@
 import json
 import sys
 from pathlib import Path
+from config import settings
+
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
+
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -10,12 +15,11 @@ def _get_base_dir() -> Path:
 
 
 BASE_DIR        = _get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return settings.gemini_api_key
 
 
 def _gemini_search(query: str) -> str:
@@ -118,20 +122,13 @@ def web_search(
     print(f"[WebSearch] 🔍 Query: {query!r}  Mode: {mode}")
 # replace: result = _gemini_search(query) block with:
     try:
-        from or_client import client
-        result = client.chat(
-            query,
-            system="You are a web search assistant. Answer factually and concisely."
-        )
+        model = get_chat_model(provider="openrouter")
+        messages = [
+            SystemMessage(content="You are a web search assistant. Answer factually and concisely."),
+            HumanMessage(content=query)
+        ]
+        result = extract_text(model.invoke(messages)).strip()
         print("[WebSearch] ✅ OpenRouter OK.")
         return result
     except Exception as e:
         print(f"[WebSearch] ⚠️ OpenRouter failed ({e}) — trying DDG...")
-        results = _ddg_search(query)
-        result  = _format_ddg(query, results)
-        print(f"[WebSearch] ✅ DDG: {len(results)} result(s).")
-        return result
-    
-    except Exception as e:
-        print(f"[WebSearch] ❌ All backends failed: {e}")
-        return f"Search failed, sir: {e}"

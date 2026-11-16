@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from config import settings
 
 
 def get_base_dir() -> Path:
@@ -51,7 +52,7 @@ def load_api_keys() -> dict:
 
 
 def get_gemini_key() -> str | None:
-    return load_api_keys().get("gemini_api_key")
+    return settings.gemini_api_key or load_api_keys().get("gemini_api_key")
 
 
 def is_configured() -> bool:

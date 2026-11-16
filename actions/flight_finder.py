@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from config import is_windows, is_mac, is_linux
+from core.llm_factory import get_chat_model, extract_text
+from langchain_core.messages import SystemMessage, HumanMessage
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -14,8 +16,8 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-BASE_DIR        = _get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+BASE_DIR = _get_base_dir()
+
 
 _MONTH_MAP: dict[str, int] = {
 
@@ -57,14 +59,13 @@ def _parse_date(raw: str) -> str:
             return val.strftime("%Y-%m-%d")
 # replace the try/except genai block with:
     try:
-        from or_client import client
-        result = client.chat(
-            f"Today is {today.strftime('%Y-%m-%d')}. "
-            f"Convert this date expression to YYYY-MM-DD: '{raw}'. "
-            f"Return ONLY the date string, nothing else.",
-            system="You are a date converter. Return only the YYYY-MM-DD string."
-        )
-        result = result.strip()
+        
+        model = get_chat_model(provider="openrouter", temperature=0.0)
+        messages = [
+            SystemMessage(content="You are a date converter. Return only the YYYY-MM-DD string."),
+            HumanMessage(content=f"Today is {today.strftime('%Y-%m-%d')}. Convert this date expression to YYYY-MM-DD: '{raw}'. Return ONLY the date string, nothing else.")
+        ]
+        result =  extract_text(model.invoke(messages)).strip()
         if re.match(r"\d{4}-\d{2}-\d{2}", result):
             return result
     except Exception as e:
@@ -143,7 +144,7 @@ def _parse_flights_with_gemini(
     destination: str,
     date:        str,
 ) -> list[dict]:
-    from or_client import client
+    
 
     prompt = (
         f"Extract flight options from {origin} to {destination} on {date} "
@@ -155,7 +156,14 @@ def _parse_flights_with_gemini(
     )
 
     try:
-        result = client.chat_json(prompt, system="Return only valid JSON. No extra text.")
+        model = get_chat_model(provider="openrouter", temperature=0.0)
+        messages = [
+            SystemMessage(content="Return only valid JSON. No extra text."),
+            HumanMessage(content=prompt)
+        ]
+        raw = extract_text(model.invoke(messages)).strip()
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+        result = json.loads(raw)
         return result if isinstance(result, list) else []
     except Exception as e:
         print(f"[FlightFinder] ⚠️ parse failed: {e}")
