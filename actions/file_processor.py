@@ -420,7 +420,7 @@ def _process_json(path: Path, action: str, params: dict, speak=None) -> str:
         preview = json.dumps(data, indent=2, ensure_ascii=False)[:8000]
         prompt  = f"Task: {action} this JSON data:\n{preview}"
         if params.get("instruction"):
-            prompt = f"{params['instruction']}\n\nJSON data:\n{previe    w}"
+            prompt = f"{params['instruction']}\n\nJSON data:\n{preview}"
         try:
             return _ask_gemini(prompt).strip()
         except Exception as e:

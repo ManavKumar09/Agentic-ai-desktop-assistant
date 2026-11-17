@@ -8,6 +8,37 @@ import sys
 from core.llm_factory import get_chat_model, extract_text
 from langchain_core.messages import SystemMessage, HumanMessage
 
+from pydantic import BaseModel, Field
+from typing import Dict, Optional
+
+class FactEntry(BaseModel):
+    value: str = Field(description="The concise fact or preference value")
+
+class ExtractedMemory(BaseModel):
+    identity: Dict[str, FactEntry] = Field(
+        default_factory=dict, 
+        description="Personal facts like name, age, city, birthday, job, etc."
+    )
+    preferences: Dict[str, FactEntry] = Field(
+        default_factory=dict, 
+        description="Favorites or preferences: food, music, color, sports, etc."
+    )
+    projects: Dict[str, FactEntry] = Field(
+        default_factory=dict, 
+        description="Active projects, ongoing work, or goals in progress"
+    )
+    relationships: Dict[str, FactEntry] = Field(
+        default_factory=dict, 
+        description="People mentioned: friends, family, colleagues"
+    )
+    wishes: Dict[str, FactEntry] = Field(
+        default_factory=dict, 
+        description="Future plans, wishlist items, travel dreams"
+    )
+    notes: Dict[str, FactEntry] = Field(
+        default_factory=dict, 
+        description="Habits, routines, schedules, or other memorable notes"
+    )
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -169,54 +200,38 @@ def should_extract_memory(user_text: str, jarvis_text: str, api_key: str = "") -
 
 
 def extract_memory(user_text: str, jarvis_text: str, api_key: str = "") -> dict:
+    """
+    Extracts structured memory facts using LangChain's with_structured_output.
+    Eliminates regex stripping and manual json.loads parsing.
+    """
     try:
-        
-
         combined = f"User: {user_text[:600]}\nJarvis: {jarvis_text[:300]}"
-        model = get_chat_model(provider="openrouter", temperature=0.2, max_tokens=1024)
-        messages = [
-            SystemMessage(content="Return ONLY valid JSON. No markdown, no explanation, no extra text."),
-            HumanMessage(content=(
-                f"Extract ALL memorable personal facts from this conversation. Any language.\n"
-                f"Return ONLY valid JSON. Use {{}} if truly nothing is worth saving.\n\n"
-                f"Category guide:\n"
-            f"  identity      → name, age, birthday, city, country, job, school, nationality, language\n"
-            f"  preferences   → ANY favorite or preferred thing:\n"
-            f"                  favorite_food, favorite_color, favorite_music, favorite_film,\n"
-            f"                  favorite_game, favorite_sport, favorite_book, favorite_artist,\n"
-            f"                  favorite_country, hobbies, interests, dislikes, etc.\n"
-            f"  projects      → projects being built, ongoing work, goals, ideas in progress\n"
-            f"                  (e.g. mark_xxv: 'Building a JARVIS-like AI assistant')\n"
-            f"  relationships → people mentioned: friends, family, partner, colleagues\n"
-            f"                  (e.g. best_friend_ali: 'Best friend, met in university')\n"
-            f"  wishes        → future plans, things to buy, travel plans, dreams\n"
-            f"  notes         → anything else worth remembering (habits, schedule, etc.)\n\n"
-            f"IMPORTANT:\n"
-            f"- Be LIBERAL: if something MIGHT be worth remembering, include it.\n"
-            f"- Extract from BOTH user and Jarvis turns.\n"
-            f"- Skip: weather, reminders, search results, one-time commands.\n"
-            f"- Use concise English values regardless of conversation language.\n\n"
-            f"Format:\n"
-            f'{{"identity":{{"name":{{"value":"Ali"}}}},\n'
-            f' "preferences":{{"favorite_color":{{"value":"blue"}}}},\n'
-            f' "projects":{{"mark_xxv":{{"value":"JARVIS-like AI assistant"}}}},\n'
-            f' "relationships":{{"friend_yusuf":{{"value":"close friend"}}}},\n'
-            f' "wishes":{{"buy_guitar":{{"value":"wants an acoustic guitar"}}}},\n'
-            f' "notes":{{"works_at_night":{{"value":"usually active late at night"}}}}}}\n\n'
-                f"Conversation:\n{combined}\n\nJSON:"
-            ))
-        ]
-        raw = extract_text(model.invoke(messages)).strip()
-        clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
-        if not clean or clean == "{}":
-            return {}
-        return json.loads(clean)
+        
+        # 1. Initialize model via factory
+        model = get_chat_model(provider="openrouter", temperature=0.1, max_tokens=1024)
+        
+        # 2. Bind the Pydantic schema for guaranteed structured output
+        structured_llm = model.with_structured_output(ExtractedMemory)
+        
+        prompt = (
+            "You are a memory extraction assistant. Extract ALL memorable personal facts, "
+            "preferences, projects, relationships, and wishes from the conversation below.\n"
+            "If nothing memorable is mentioned, return empty dictionaries.\n\n"
+            f"Conversation:\n{combined}"
+        )
+        
+        # 3. Invoke structured LLM directly
+        result: ExtractedMemory = structured_llm.invoke(prompt)
+        
+        # 4. Convert Pydantic object to dict for saving (format matches existing JSON structure)
+        data = result.model_dump()
+        
+        # Clean out empty categories
+        return {cat: items for cat, items in data.items() if items}
 
-    except json.JSONDecodeError:
-        return {}
     except Exception as e:
         if "429" not in str(e):
-            print(f"[Memory] ⚠️ Extract failed: {e}")
+            print(f"[Memory] ⚠️ Structured extract failed: {e}")
         return {}
 
 
